@@ -21,7 +21,7 @@ def test_action_is_a_composite_with_the_inputs_other_repos_need():
     assert not inputs["anthropic-api-key"]["required"]
     assert inputs["run-id"]["default"] == "${{ github.event.workflow_run.id }}"
     assert inputs["repo"]["default"] == "${{ github.repository }}"
-    assert inputs["mode"]["default"] == "hybrid"
+    assert inputs["mode"]["default"] == "agent"
     assert inputs["model"]["default"] == "" and inputs["effort"]["default"] == ""
 
 
@@ -56,7 +56,8 @@ def test_this_repo_triage_workflow_uses_its_own_action():
     workflow = load_workflow((ROOT / ".github" / "workflows" / "triage.yml").read_text())
     steps = workflow["jobs"]["triage"]["steps"]
     action_step = next(s for s in steps if s.get("uses") == "./")
-    assert set(action_step["with"]) == {"github-token", "anthropic-api-key", "slack-webhook-url"}
+    assert set(action_step["with"]) == {"github-token", "anthropic-api-key", "slack-webhook-url", "aws-role-arn",
+                                        "aws-region"}
 
 
 def test_example_for_other_repos_is_valid_and_complete():
@@ -74,3 +75,18 @@ def test_example_for_other_repos_is_valid_and_complete():
 
 def test_readme_shows_the_example_verbatim():
     assert EXAMPLE_TEXT.strip() in (ROOT / "README.md").read_text()
+
+
+def test_aws_login_is_optional_read_only_and_precedes_the_agent():
+    inputs = ACTION["inputs"]
+    assert not inputs["aws-role-arn"]["required"] and inputs["aws-role-arn"]["default"] == ""
+    steps = ACTION["runs"]["steps"]
+    login = next(s for s in steps if str(s.get("uses", "")).startswith("aws-actions/configure-aws-credentials"))
+    assert login["if"] == "${{ inputs.aws-role-arn != '' }}"
+    assert login["with"]["role-to-assume"] == "${{ inputs.aws-role-arn }}"
+    notify = next(s for s in steps if "triage notify" in s.get("run", ""))
+    assert steps.index(login) < steps.index(notify)
+    # CloudTrail search switches on only when a role was given
+    assert "inputs.aws-role-arn != ''" in notify["env"]["TRIAGE_CLOUDTRAIL"]
+    # no stored AWS keys anywhere in the action
+    assert not re.search(r"AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY)|aws-access-key", (ROOT / "action.yml").read_text())

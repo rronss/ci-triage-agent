@@ -73,7 +73,7 @@ def test_triage_workflow_watches_ci_and_only_reacts_to_failures():
     assert trigger["workflows"] == [load("ci.yml")["name"]]
     assert trigger["types"] == ["completed"]
     assert workflow["jobs"]["triage"]["if"] == "github.event.workflow_run.conclusion == 'failure'"
-    assert workflow["permissions"] == {"actions": "read", "contents": "read"}
+    assert workflow["permissions"] == {"actions": "read", "contents": "read", "id-token": "write"}
 
 
 def test_triage_workflow_never_checks_out_the_failed_runs_code():

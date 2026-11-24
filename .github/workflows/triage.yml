@@ -11,6 +11,7 @@ on:
 permissions:
   actions: read
   contents: read
+  id-token: write # lets the action assume the read-only AWS role through GitHub OIDC (no stored keys)
 
 jobs:
   triage:
@@ -25,3 +26,5 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          aws-role-arn: ${{ vars.AWS_AGENT_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}

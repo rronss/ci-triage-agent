@@ -27,9 +27,9 @@ inputs:
     required: false
     default: ${{ github.repository }}
   mode:
-    description: "hybrid (rules first, then the model), rules (never call the model) or llm (always call the model)."
+    description: "agent (rules first, then an investigation loop with read-only tools), hybrid (rules, then one model call), rules (never call the model) or llm (always call the model)."
     required: false
-    default: hybrid
+    default: agent
   model:
     description: Claude model to use. Empty means the agent's default.
     required: false
@@ -38,6 +38,17 @@ inputs:
     description: Model effort level (low, medium, high). Empty means the agent's default.
     required: false
     default: ""
+
+  aws-role-arn:
+    description: >-
+      Optional. ARN of a read-only AWS role that trusts GitHub OIDC, which the agent assumes to search CloudTrail.
+      The calling job needs `permissions: id-token: write`. Empty means the agent does not search CloudTrail.
+    required: false
+    default: ""
+  aws-region:
+    description: AWS region for the CloudTrail search. Used only with aws-role-arn.
+    required: false
+    default: us-east-1
 
 runs:
   using: composite
@@ -52,6 +63,14 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
       run: python -m pip install --quiet -r "$ACTION_PATH/requirements.txt"
 
+    - name: Log in to AWS with the read-only role
+      if: ${{ inputs.aws-role-arn != '' }}
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.aws-role-arn }}
+        aws-region: ${{ inputs.aws-region }}
+        role-session-name: ci-triage-agent
+
     - name: Diagnose the failed run and post the result
       shell: bash
       env:
@@ -61,6 +80,7 @@ runs:
         SLACK_WEBHOOK_URL: ${{ inputs.slack-webhook-url }}
         TRIAGE_MODEL: ${{ inputs.model }}
         TRIAGE_EFFORT: ${{ inputs.effort }}
+        TRIAGE_CLOUDTRAIL: ${{ inputs.aws-role-arn != '' && '1' || '0' }}
         INPUT_REPO: ${{ inputs.repo }}
         INPUT_RUN_ID: ${{ inputs.run-id }}
         INPUT_MODE: ${{ inputs.mode }}

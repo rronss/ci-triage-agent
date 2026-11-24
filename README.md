@@ -71,9 +71,11 @@ default branch. To watch several pipelines, list them all under `workflows:`.
 | `anthropic-api-key` | no | empty | Without it, only failures the rules recognise are diagnosed; the rest are posted as `needs_human_review`. |
 | `run-id` | no | the triggering run | Which failed run to diagnose. |
 | `repo` | no | this repository | `owner/name` of the run's repository. |
-| `mode` | no | `hybrid` | `hybrid` (rules, then one model call), `agent` (rules, then an investigation loop with tools), `rules` (never call the model), `llm` (always call the model). |
+| `mode` | no | `agent` | `agent` (rules, then an investigation loop with read-only tools), `hybrid` (rules, then one model call), `rules` (never call the model), `llm` (always call the model). |
 | `model` | no | `claude-sonnet-5-5` | Any Claude model ID. `claude-opus-5-5` is the stronger, pricier option. |
 | `effort` | no | `medium` | Model effort level. |
+| `aws-role-arn` | no | empty | A read-only AWS role that trusts GitHub OIDC, assumed to search CloudTrail. The calling job needs `permissions: id-token: write`. Empty means no CloudTrail search. |
+| `aws-region` | no | `us-east-1` | Region of the CloudTrail search. |
 
 Runs on Linux GitHub-hosted (or self-hosted Linux) runners. Each diagnosis is also saved as an artifact
 named `diagnosis-<run id>`: the full record, including the model used and token counts.
@@ -125,7 +127,7 @@ Slack message. The model calls and tokens are summed in `usage`, so a diagnosis 
   blanked before any text leaves GitHub. This is pattern-based and will miss secrets with no recognisable shape.
 - **Fails loudly.** A missing Slack webhook fails the run; an unavailable model produces a visible
   `needs_human_review` message, never silence.
-- **Your logs go to a third party.** In `hybrid` and `llm` mode, redacted log excerpts are sent to the
+- **Your logs go to a third party.** In `agent`, `hybrid` and `llm` mode, redacted log excerpts are sent to the
   Anthropic API. Use `mode: rules` if that is not acceptable.
 
 ## Cost and speed
@@ -136,6 +138,8 @@ Measured on the sandbox pipeline below, not on a production workload:
 - **Cost:** about $0.017 per model diagnosis on Claude Sonnet 5.5 (6,547 input and 354 output tokens, $2 / $10
   per million), roughly twice that on Opus 5.5. Failures decided by rules cost nothing. At 15 failures a
   week that is at most about $0.25 a week.
+- **Agent mode** makes several model calls per diagnosis, so it costs more than this single-call figure. It has not
+  been measured yet.
 
 ## Evaluating it
 

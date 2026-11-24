@@ -56,6 +56,30 @@ class GitHubClient:
         data = self._get(f"/repos/{repo}/actions/workflows/{workflow}/runs", status="failure", per_page=100).json()
         return data["workflow_runs"]
 
+    # ---- read-only lookups used by the agent's investigation tools
+    def get_run(self, repo: str, run_id: int) -> dict:
+        return self._get(f"/repos/{repo}/actions/runs/{run_id}").json()
+
+    def last_green_run(self, repo: str, run: dict) -> dict | None:
+        """The most recent successful run of the same workflow on the same branch, created before `run`."""
+        data = self._get(
+            f"/repos/{repo}/actions/workflows/{run['workflow_id']}/runs",
+            branch=run.get("head_branch"), status="success", per_page=30,
+        ).json()
+        for candidate in data["workflow_runs"]:
+            if candidate["id"] != run["id"] and candidate.get("created_at", "") < run.get("created_at", ""):
+                return candidate
+        return None
+
+    def list_commits(self, repo: str, sha: str, limit: int) -> list[dict]:
+        return self._get(f"/repos/{repo}/commits", sha=sha, per_page=limit).json()
+
+    def get_commit(self, repo: str, sha: str) -> dict:
+        return self._get(f"/repos/{repo}/commits/{sha}").json()
+
+    def compare(self, repo: str, base: str, head: str) -> dict:
+        return self._get(f"/repos/{repo}/compare/{base}...{head}").json()
+
     def fetch_failure(self, repo: str, run_id: int) -> tuple[dict, str]:
         """Return (metadata, combined log of the failed jobs) for a run."""
         run = self._get(f"/repos/{repo}/actions/runs/{run_id}").json()

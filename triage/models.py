@@ -23,6 +23,7 @@ class Diagnosis:
     redactions: int = 0
     model: str = ""  # the model that answered (a fallback model if the first one declined); empty for rules
     usage: dict = field(default_factory=dict)
+    steps: list = field(default_factory=list)  # the agent's investigation: one {"tool", "input", "result_chars"} per tool call
 
     def to_dict(self) -> dict:
         return asdict(self)

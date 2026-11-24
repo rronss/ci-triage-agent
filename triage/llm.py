@@ -86,20 +86,40 @@ def parse_response(response) -> Diagnosis:
 
     text = next((b.text for b in response.content if getattr(b, "type", None) == "text"), "")
     try:
-        data = json.loads(text)
-        category, confidence = data["category"], data["confidence"]
-        if category not in CATEGORIES or confidence not in CONFIDENCES:
-            raise ValueError(f"unexpected values: {category!r}, {confidence!r}")
-        return Diagnosis(
-            category=category,
-            confidence=confidence,
-            summary=str(data["summary"]),
-            evidence=[str(e) for e in data["evidence"]][:5],
-            next_step=str(data["next_step"]),
-            source="llm",
-        )
+        return diagnosis_from_data(json.loads(text))
     except (ValueError, KeyError, TypeError) as exc:
         return _review(f"The model's answer could not be parsed ({exc}).")
+
+
+def diagnosis_from_data(data: dict, source: str = "llm") -> Diagnosis:
+    """Validate the model's structured answer. Raises ValueError, KeyError or TypeError if it is malformed."""
+    category, confidence = data["category"], data["confidence"]
+    if category not in CATEGORIES or confidence not in CONFIDENCES:
+        raise ValueError(f"unexpected values: {category!r}, {confidence!r}")
+    return Diagnosis(
+        category=category,
+        confidence=confidence,
+        summary=str(data["summary"]),
+        evidence=[str(e) for e in data["evidence"]][:5],
+        next_step=str(data["next_step"]),
+        source=source,
+    )
+
+
+def model_settings(model: str | None, effort: str | None) -> tuple[str, str]:
+    """Explicit argument, then the TRIAGE_* environment variable, then the default. Blank counts as unset."""
+    return (
+        model or os.environ.get("TRIAGE_MODEL") or DEFAULT_MODEL,
+        effort or os.environ.get("TRIAGE_EFFORT") or DEFAULT_EFFORT,
+    )
+
+
+def add_fallbacks(request: dict) -> None:
+    if os.environ.get("TRIAGE_FALLBACKS", "1") == "1":
+        # Server-side re-run on another model if the safety classifiers decline. Claude API only:
+        # set TRIAGE_FALLBACKS=0 on Bedrock, Vertex or Foundry.
+        request["extra_headers"] = {"anthropic-beta": FALLBACK_BETA}
+        request["extra_body"] = {"fallbacks": "default"}
 
 
 def classify(
@@ -116,21 +136,15 @@ def classify(
         raise LLMUnavailable("the 'anthropic' package is not installed (pip install -r requirements.txt)") from exc
 
     client = client or anthropic.Anthropic()
+    model, effort = model_settings(model, effort)
     request = dict(
-        model=model or os.environ.get("TRIAGE_MODEL") or DEFAULT_MODEL,
+        model=model,
         max_tokens=8000,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": build_user_message(meta, excerpt, hint)}],
-        output_config={
-            "effort": effort or os.environ.get("TRIAGE_EFFORT") or DEFAULT_EFFORT,
-            "format": {"type": "json_schema", "schema": SCHEMA},
-        },
+        output_config={"effort": effort, "format": {"type": "json_schema", "schema": SCHEMA}},
     )
-    if os.environ.get("TRIAGE_FALLBACKS", "1") == "1":
-        # Server-side re-run on another model if the safety classifiers decline. Claude API only:
-        # set TRIAGE_FALLBACKS=0 on Bedrock, Vertex or Foundry.
-        request["extra_headers"] = {"anthropic-beta": FALLBACK_BETA}
-        request["extra_body"] = {"fallbacks": "default"}
+    add_fallbacks(request)
 
     try:
         response = client.messages.create(**request)

@@ -71,7 +71,7 @@ default branch. To watch several pipelines, list them all under `workflows:`.
 | `anthropic-api-key` | no | empty | Without it, only failures the rules recognise are diagnosed; the rest are posted as `needs_human_review`. |
 | `run-id` | no | the triggering run | Which failed run to diagnose. |
 | `repo` | no | this repository | `owner/name` of the run's repository. |
-| `mode` | no | `hybrid` | `hybrid` (rules, then the model), `rules` (never call the model), `llm` (always call the model). |
+| `mode` | no | `hybrid` | `hybrid` (rules, then one model call), `agent` (rules, then an investigation loop with tools), `rules` (never call the model), `llm` (always call the model). |
 | `model` | no | `claude-sonnet-5-5` | Any Claude model ID. `claude-opus-5-5` is the stronger, pricier option. |
 | `effort` | no | `medium` | Model effort level. |
 
@@ -90,6 +90,28 @@ named `diagnosis-<run id>`: the full record, including the model used and token 
    model with the run's metadata and any rule hint. The model returns structured JSON.
 6. Anything unclear, refused, truncated or unparseable becomes `needs_human_review`.
 7. The record is saved, then the result is posted to Slack with the evidence, next step and a link to the run.
+
+### Agent mode: investigate before answering
+
+With `mode: agent`, a failure that no rule settles is handed to the model as a short **investigation loop**
+instead of a single call. The model must call a tool every turn, may investigate for up to 6 turns
+(`TRIAGE_MAX_STEPS`), and finishes by calling `submit_diagnosis`. On the last turn only that call is allowed, so
+the loop always ends. Every tool is read-only:
+
+| Tool | What it answers |
+|---|---|
+| `search_logs`, `read_log_lines` | What does the rest of the log say? The first error, earlier warnings. |
+| `compare_with_last_green` | Did the code change since this workflow last passed on this branch? Which commits and files? |
+| `get_recent_commits`, `get_commit_diff` | What exactly did a suspicious commit change? |
+| `search_cloudtrail` | Did something change in the AWS account shortly before (an IAM edit, a deleted resource, a rejected call)? |
+
+`search_cloudtrail` is off unless `TRIAGE_CLOUDTRAIL=1` and AWS credentials exist. It only ever calls
+`cloudtrail:LookupEvents`, and the role in `terraform/` allows nothing else. CloudTrail event history lags by up
+to about 15 minutes, so the agent can see earlier changes reliably but a call made seconds ago may not appear.
+
+Every tool result is redacted and capped at 6,000 characters before the model sees it, and the model is told
+that tool output is untrusted data. The steps taken are saved in the diagnosis record (`steps`) and named in the
+Slack message. The model calls and tokens are summed in `usage`, so a diagnosis costs more than in `hybrid` mode.
 
 ## Safety model
 
@@ -178,7 +200,8 @@ fallback (needed off the Claude API, e.g. on Bedrock).
 
 ```
 action.yml                    The reusable GitHub Action other repositories use.
-triage/                       The agent: log cleanup, redaction, excerpting, rules, model call, GitHub, Slack, eval.
+triage/                       The agent: log cleanup, redaction, excerpting, rules, model call, investigation loop and tools, GitHub, CloudTrail, Slack, eval.
+terraform/                    AWS for the sandbox and CloudTrail: GitHub OIDC login, read-only agent role, deploy role and bucket.
 examples/triage.yml           The workflow to copy into your repository.
 docs/                         Architecture diagram.
 .github/workflows/triage.yml  This repository's own triage workflow (uses ./action.yml).

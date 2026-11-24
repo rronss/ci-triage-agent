@@ -4,3 +4,10 @@ __pycache__/
 *.pyc
 .env
 .DS_Store
+
+# Terraform: local state and provider cache stay out of git (state can contain account details)
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfplan
+terraform/crash.log

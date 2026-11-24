@@ -29,6 +29,10 @@ def build_message(d: Diagnosis, meta: dict | None, run_url: str) -> dict:
     if meta.get("run_attempt"):
         where += f" (attempt {meta['run_attempt']})"
     label = LABELS.get(d.category, d.category)
+    note = ""
+    if d.steps:
+        tools = ", ".join(dict.fromkeys(step["tool"] for step in d.steps))
+        note = f" It investigated with {len(d.steps)} tool call(s): {tools}."
 
     blocks = [
         {"type": "header", "text": {"type": "plain_text", "text": "CI failure diagnosis"}},
@@ -45,7 +49,7 @@ def build_message(d: Diagnosis, meta: dict | None, run_url: str) -> dict:
             "elements": [
                 {
                     "type": "mrkdwn",
-                    "text": f"Suggested diagnosis from the triage agent (via {d.source}). Check it against the log before acting.",
+                    "text": f"Suggested diagnosis from the triage agent (via {d.source}).{note} Check it against the log before acting.",
                 }
             ],
         }

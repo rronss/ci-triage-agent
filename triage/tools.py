@@ -180,6 +180,8 @@ class Toolbox:
             return "There is no earlier successful run of this workflow on this branch to compare with."
         base, head = green["head_sha"], self.run["head_sha"]
         when = green.get("created_at", "unknown time")
+        if green.get("head_branch") and green["head_branch"] != self.run.get("head_branch"):
+            when += f", on branch {green['head_branch']} (this branch has no successful run of its own)"
         if base == head:
             return (f"The last successful run (id {green['id']}, {when}) built the same commit {head[:8]}. The code did "
                     "not change between that run and this failure, so a code change in this repository is not the cause.")

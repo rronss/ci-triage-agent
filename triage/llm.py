@@ -17,8 +17,9 @@ Categories:
 in application code, compile or lint error). It would fail again on a re-run of the same commit.
 - flaky_test: a failure that is nondeterministic and unrelated to the change: timing or race conditions, \
 ordering dependence, shared state, timeouts inside a test, or a test that is known to pass on re-run.
-- infra_failure: the CI environment or an external service failed: runner shutdown, out of disk or memory, \
-network or DNS errors, registry or API rate limits, upstream outages.
+- infra_failure: the CI environment, the cloud account it deploys to, or an external service failed: runner \
+shutdown, out of disk or memory, network or DNS errors, registry or API rate limits, upstream outages, or a \
+deployment rejected because cloud permissions or resources were changed (for example an IAM policy edit).
 - dependency_env: packages, versions, toolchain or environment configuration: unresolvable versions, missing \
 modules, wrong runtime version, missing environment variables.
 - needs_human_review: the evidence is insufficient or contradictory. Use this rather than guessing.

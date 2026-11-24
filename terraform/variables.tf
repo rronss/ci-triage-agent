@@ -15,3 +15,13 @@ variable "name_prefix" {
   type        = string
   default     = "ci-triage"
 }
+
+variable "deploy_can_write" {
+  description = <<-EOT
+    Whether the sandbox deploy role may write to the bucket. Set to false to plant a permission change: the managed
+    policy is edited (a CreatePolicyVersion event in CloudTrail) and the next deploy fails with AccessDenied.
+    Set back to true to restore it.
+  EOT
+  type        = bool
+  default     = true
+}

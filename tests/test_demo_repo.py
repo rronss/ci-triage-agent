@@ -113,3 +113,42 @@ def test_no_label_words_in_sample_logs_or_metadata():
 def test_leak_check_would_catch_the_old_names():
     for old in ("SCENARIO: flaky", "CI (real_bug)", "infra_timeout", "dependency_missing", "# Simulated flake"):
         assert LEAK.search(old), old
+
+
+# --- The sandbox deploy job -------------------------------------------------------------------------------
+
+
+def test_ci_also_runs_on_the_prepared_sandbox_branches():
+    assert load("ci.yml")["_on"]["push"]["branches"] == ["main", "sandbox/**"]
+
+
+def test_deploy_job_runs_only_after_passing_tests_and_only_when_configured():
+    deploy = load("ci.yml")["jobs"]["deploy"]
+    assert deploy["needs"] == "test"
+    condition = deploy["if"]
+    assert "success()" in condition and "vars.AWS_DEPLOY_ROLE_ARN != ''" in condition
+    assert '["none", "case_e"]' in condition
+
+
+def test_only_the_deploy_job_may_request_a_cloud_token():
+    workflow = load("ci.yml")
+    assert "permissions" not in workflow  # the test job keeps the default, read-only permissions
+    assert workflow["jobs"]["deploy"]["permissions"] == {"id-token": "write", "contents": "read"}
+    assert "permissions" not in workflow["jobs"]["test"]
+
+
+def test_deploy_uses_a_role_from_a_repo_variable_and_no_stored_keys():
+    text = (WORKFLOWS / "ci.yml").read_text()
+    assert "vars.AWS_DEPLOY_ROLE_ARN" in text and "role-to-assume" in text
+    assert not re.search(r"AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY)|secrets\.AWS", text)
+    steps = load("ci.yml")["jobs"]["deploy"]["steps"]
+    # repository variables reach the shell through env, never by interpolation into the script
+    assert all("${{" not in step.get("run", "") for step in steps)
+
+
+def test_deploy_is_the_last_step_in_the_cloud_case_and_the_case_is_labelled_as_cloud_trouble():
+    from triage.models import INFRA_FAILURE
+    assert CASE_LABELS["case_e"] == INFRA_FAILURE
+    from triage.dataset import BRANCH_LABELS
+    assert BRANCH_LABELS == {"sandbox/change-1": "real_failure"}
+    assert not LEAK.search(" ".join(BRANCH_LABELS)), "the branch name reaches the model"

@@ -109,10 +109,13 @@ data "aws_iam_policy_document" "deploy" {
     resources = [aws_s3_bucket.sandbox.arn]
   }
 
-  statement {
-    sid       = "WriteSandboxObjects"
-    actions   = ["s3:PutObject", "s3:GetObject"]
-    resources = ["${aws_s3_bucket.sandbox.arn}/*"]
+  dynamic "statement" {
+    for_each = var.deploy_can_write ? [1] : []
+    content {
+      sid       = "WriteSandboxObjects"
+      actions   = ["s3:PutObject", "s3:GetObject"]
+      resources = ["${aws_s3_bucket.sandbox.arn}/*"]
+    }
   }
 }
 

@@ -5,7 +5,7 @@ run-name: CI (${{ github.event.inputs.case || 'push' }})
 
 on:
   push:
-    branches: [main]
+    branches: [main, "sandbox/**"]
   workflow_dispatch:
     inputs:
       case:
@@ -18,6 +18,7 @@ on:
           - case_b
           - case_c
           - case_d
+          - case_e
 
 env:
   CASE: ${{ github.event.inputs.case || 'none' }}
@@ -54,3 +55,26 @@ jobs:
 
       - name: Run tests
         run: pytest -v
+
+  deploy:
+    # Uploads the build to the sandbox bucket with short-lived AWS credentials (GitHub OIDC, no stored keys).
+    # Skipped unless the repository variable AWS_DEPLOY_ROLE_ARN is set, so forks and other copies are unaffected.
+    needs: test
+    if: ${{ success() && vars.AWS_DEPLOY_ROLE_ARN != '' && contains(fromJSON('["none", "case_e"]'), github.event.inputs.case || 'none') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Upload the build
+        env:
+          BUCKET: ${{ vars.SANDBOX_BUCKET }}
+        run: |
+          echo "build ${GITHUB_SHA} run ${GITHUB_RUN_ID}" > build.txt
+          aws s3 cp build.txt "s3://${BUCKET}/builds/${GITHUB_RUN_ID}.txt"

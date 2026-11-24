@@ -14,6 +14,13 @@ CASE_LABELS = {
     "case_b": FLAKY_TEST,
     "case_c": INFRA_FAILURE,
     "case_d": DEPENDENCY_ENV,
+    # The deploy runs while the sandbox's deploy permission has been edited in AWS (terraform: deploy_can_write=false).
+    "case_e": INFRA_FAILURE,
+}
+# Runs triggered by a push to a prepared branch carry no case code, so they are labelled by branch name. The
+# branch holds one commit that breaks the code. The name is neutral on purpose: it reaches the model as metadata.
+BRANCH_LABELS = {
+    "sandbox/change-1": REAL_FAILURE,
 }
 _TITLE = re.compile(r"^CI \((\w+)\)")
 
@@ -28,6 +35,7 @@ def build_dataset(github, repo: str, out_dir: Path, workflow: str = "ci.yml") ->
     for run in github.list_failed_runs(repo, workflow):
         match = _TITLE.match(run.get("display_title", ""))
         label = CASE_LABELS.get(match.group(1)) if match else None
+        label = label or BRANCH_LABELS.get(run.get("head_branch", ""))
         entry_id = f"run-{run['id']}"
         if label is None or entry_id in seen:
             continue

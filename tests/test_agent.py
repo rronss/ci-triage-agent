@@ -212,6 +212,16 @@ def test_compare_lists_commits_and_files():
     assert "bbb22222 2026-11-24T08:30:00Z Change the discount rule" in out and "app/orders.py" in out
 
 
+def test_compare_says_when_the_green_run_was_on_another_branch():
+    class OnMain(FakeGitHub):
+        def last_green_run(self, repo, run):
+            return {"id": 5, "created_at": "2026-11-24T08:00:00Z", "head_sha": "aaa11111", "head_branch": "main"}
+
+    box = Toolbox(LOG, **context(github=OnMain(), run={**RUN, "head_branch": "sandbox/change-1"}))
+    out = box.call("compare_with_last_green", {})
+    assert "on branch main (this branch has no successful run of its own)" in out
+
+
 def test_compare_without_a_green_run():
     out = Toolbox(LOG, **context(github=FakeGitHub(green=False))).call("compare_with_last_green", {})
     assert "no earlier successful run" in out

@@ -60,15 +60,24 @@ class GitHubClient:
     def get_run(self, repo: str, run_id: int) -> dict:
         return self._get(f"/repos/{repo}/actions/runs/{run_id}").json()
 
-    def last_green_run(self, repo: str, run: dict) -> dict | None:
-        """The most recent successful run of the same workflow on the same branch, created before `run`."""
+    def _green_on(self, repo: str, run: dict, branch: str | None) -> dict | None:
         data = self._get(
-            f"/repos/{repo}/actions/workflows/{run['workflow_id']}/runs",
-            branch=run.get("head_branch"), status="success", per_page=30,
+            f"/repos/{repo}/actions/workflows/{run['workflow_id']}/runs", branch=branch, status="success", per_page=30
         ).json()
         for candidate in data["workflow_runs"]:
             if candidate["id"] != run["id"] and candidate.get("created_at", "") < run.get("created_at", ""):
                 return candidate
+        return None
+
+    def last_green_run(self, repo: str, run: dict) -> dict | None:
+        """The most recent successful run of the same workflow created before `run`: on the same branch, or, if
+        that branch has none (a new feature branch), on the repository's default branch."""
+        green = self._green_on(repo, run, run.get("head_branch"))
+        if green is not None:
+            return green
+        default = self._get(f"/repos/{repo}").json().get("default_branch")
+        if default and default != run.get("head_branch"):
+            return self._green_on(repo, run, default)
         return None
 
     def list_commits(self, repo: str, sha: str, limit: int) -> list[dict]:

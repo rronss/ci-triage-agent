@@ -24,7 +24,7 @@ data "aws_caller_identity" "current" {}
 
 locals {
   account_id = data.aws_caller_identity.current.account_id
-  repo_sub   = "repo:${var.github_repository}:*"
+  repo_sub   = "${var.github_subject_prefix}:*"
   bucket     = "${var.name_prefix}-sandbox-${local.account_id}"
 }
 

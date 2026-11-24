@@ -84,9 +84,11 @@ def test_aws_login_is_optional_read_only_and_precedes_the_agent():
     login = next(s for s in steps if str(s.get("uses", "")).startswith("aws-actions/configure-aws-credentials"))
     assert login["if"] == "${{ inputs.aws-role-arn != '' }}"
     assert login["with"]["role-to-assume"] == "${{ inputs.aws-role-arn }}"
+    # a failed login must not stop the triage
+    assert login["continue-on-error"] is True and login["id"] == "aws"
     notify = next(s for s in steps if "triage notify" in s.get("run", ""))
     assert steps.index(login) < steps.index(notify)
     # CloudTrail search switches on only when a role was given
-    assert "inputs.aws-role-arn != ''" in notify["env"]["TRIAGE_CLOUDTRAIL"]
+    assert "steps.aws.outcome == 'success'" in notify["env"]["TRIAGE_CLOUDTRAIL"]
     # no stored AWS keys anywhere in the action
     assert not re.search(r"AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY)|aws-access-key", (ROOT / "action.yml").read_text())

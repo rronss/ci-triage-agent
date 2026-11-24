@@ -8,4 +8,4 @@ def order_total(items):
 def apply_discount(total, percent):
     if os.environ.get("CASE") == "case_a":
         return max(total - percent, 0.0)
-    return round(max(total * (1 - percent / 100), 0.0), 2)
+    return round(max(total * (1 - percent / 10), 0.0), 2)

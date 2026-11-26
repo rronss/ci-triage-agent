@@ -372,9 +372,9 @@ def test_slack_message_shows_how_the_agent_investigated():
     model = ScriptedModel([use("compare_with_last_green")], [use("search_logs", pattern="x")], submit())
     d = diagnose_text(ASSERTION_LOG, mode="agent", client=model, tool_context=context())
     text = json.dumps(build_message(d, {"workflow": "CI", "branch": "main"}, "https://example.test/run"))
-    assert "investigated with 2 tool call(s): compare_with_last_green, search_logs" in text
+    assert "2 tool call(s): compare_with_last_green, search_logs" in text
 
 
 def test_slack_message_without_steps_is_unchanged(fake):
     d = diagnose_text(ASSERTION_LOG, client=fake)
-    assert "investigated" not in json.dumps(build_message(d, {}, "https://example.test/run"))
+    assert "tool call" not in json.dumps(build_message(d, {}, "https://example.test/run"))

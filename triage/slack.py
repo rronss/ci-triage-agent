@@ -5,11 +5,19 @@ import requests
 from .models import DEPENDENCY_ENV, FLAKY_TEST, INFRA_FAILURE, NEEDS_REVIEW, REAL_FAILURE, Diagnosis
 
 LABELS = {
-    REAL_FAILURE: ":bug: Real failure",
-    FLAKY_TEST: ":game_die: Flaky test",
-    INFRA_FAILURE: ":cloud: Infra failure",
-    DEPENDENCY_ENV: ":package: Dependency / environment",
-    NEEDS_REVIEW: ":mag: Needs human review",
+    REAL_FAILURE: "Real failure",
+    FLAKY_TEST: "Flaky test",
+    INFRA_FAILURE: "Infra failure",
+    DEPENDENCY_ENV: "Dependency / environment",
+    NEEDS_REVIEW: "Needs human review",
+}
+# The only colour in the message: a thin bar beside the evidence, one muted colour per category.
+COLORS = {
+    REAL_FAILURE: "#B42318",  # red
+    FLAKY_TEST: "#B54708",  # amber
+    INFRA_FAILURE: "#175CD3",  # blue
+    DEPENDENCY_ENV: "#6941C6",  # purple
+    NEEDS_REVIEW: "#98A2B3",  # grey
 }
 MAX_TEXT = 2800  # Slack section text limit is 3000
 
@@ -19,48 +27,65 @@ def escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _clip(text: str) -> str:
-    return text if len(text) <= MAX_TEXT else text[: MAX_TEXT - 1] + "…"
+def _clip(text: str, limit: int = MAX_TEXT) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _section(text: str) -> dict:
+    return {"type": "section", "text": {"type": "mrkdwn", "text": _clip(text)}}
+
+
+def _context(text: str) -> dict:
+    return {"type": "context", "elements": [{"type": "mrkdwn", "text": _clip(text)}]}
+
+
+def _repository(meta: dict, run_url: str) -> str:
+    """owner/name from the run's metadata, or else from the run's URL."""
+    if meta.get("repository"):
+        return str(meta["repository"])
+    parts = run_url.split("github.com/")[-1].split("/")
+    return "/".join(parts[:2]) if len(parts) >= 2 else "unknown"
 
 
 def build_message(d: Diagnosis, meta: dict | None, run_url: str) -> dict:
     meta = meta or {}
-    where = f"{escape(str(meta.get('workflow') or 'CI'))} on `{escape(str(meta.get('branch') or 'unknown'))}`"
-    if meta.get("run_attempt"):
-        where += f" (attempt {meta['run_attempt']})"
+    repo = _clip(escape(_repository(meta, run_url)).replace("|", "/"), 200)
+    workflow = _clip(escape(str(meta.get("workflow") or "CI")), 200)
+    branch = _clip(escape(str(meta.get("branch") or "unknown")), 200)
     label = LABELS.get(d.category, d.category)
-    note = ""
+    confidence = f"{escape(d.confidence).capitalize()} confidence"
+
+    where = [f"<https://github.com/{repo}|{repo}>", workflow, f"`{branch}`"]
+    if str(meta.get("run_attempt") or "1") != "1":
+        where.append(f"attempt {escape(str(meta['run_attempt']))}")
+    where.append(f"<{run_url}|View run>")
+
+    source = ["Triage agent", d.source]
     if d.steps:
         tools = ", ".join(dict.fromkeys(step["tool"] for step in d.steps))
-        note = f" It investigated with {len(d.steps)} tool call(s): {tools}."
+        source.append(f"{len(d.steps)} tool call(s): {tools}")
+    source.append("Check against the log before acting")
 
+    # Everything needed to act is in the top-level blocks, which Slack never folds. The coloured card, which Slack may
+    # fold behind "Show more" when long, holds only the evidence and where the diagnosis came from.
     blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": "CI failure diagnosis"}},
-        {"type": "section", "text": {"type": "mrkdwn", "text": f"{where}\n*{label}*  |  confidence: *{d.confidence}*"}},
-        {"type": "section", "text": {"type": "mrkdwn", "text": _clip(escape(d.summary))}},
+        _section(f"*{label}*  ·  {confidence}"),
+        _context("  ·  ".join(where)),
+        _section(escape(d.summary)),
+        _section(f"*Next step*\n{escape(d.next_step)}"),
     ]
+    card = []
     if d.evidence:
         evidence = "\n".join(escape(line).replace("```", "'''") for line in d.evidence)
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": _clip(f"*Evidence*\n```{evidence}```")}})
-    blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": _clip(f"*Next step:* {escape(d.next_step)}")}})
-    blocks.append(
-        {
-            "type": "context",
-            "elements": [
-                {
-                    "type": "mrkdwn",
-                    "text": f"Suggested diagnosis from the triage agent (via {d.source}).{note} Check it against the log before acting.",
-                }
-            ],
-        }
-    )
-    blocks.append(
-        {
-            "type": "actions",
-            "elements": [{"type": "button", "text": {"type": "plain_text", "text": "Open run"}, "url": run_url}],
-        }
-    )
-    return {"text": f"CI failure: {label} ({d.confidence} confidence)", "blocks": blocks}
+        card.append(_section(f"```{_clip(evidence, MAX_TEXT - 10)}```"))  # clip the lines, not the closing fence
+    card.append(_context("  ·  ".join(source)))
+    return {
+        "text": f"CI failure in {repo}: {label} ({d.confidence} confidence)",  # notification preview
+        "blocks": blocks,
+        "attachments": [{"color": COLORS.get(d.category, COLORS[NEEDS_REVIEW]), "blocks": card}],
+        "unfurl_links": False,  # no GitHub preview cards under the message
+        "unfurl_media": False,
+    }
 
 
 def post(webhook_url: str, payload: dict, session=None) -> None:

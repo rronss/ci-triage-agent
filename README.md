@@ -96,9 +96,10 @@ named `diagnosis-<run id>`: the full record, including the model used and token 
 ### Agent mode: investigate before answering
 
 With `mode: agent`, a failure that no rule settles is handed to the model as a short **investigation loop**
-instead of a single call. The model must call a tool every turn, may investigate for up to 6 turns
-(`TRIAGE_MAX_STEPS`), and finishes by calling `submit_diagnosis`. On the last turn only that call is allowed, so
-the loop always ends. Every tool is read-only:
+instead of a single call. The model may investigate for up to 6 turns (`TRIAGE_MAX_STEPS`) and finishes by calling
+`submit_diagnosis`. Current models do not allow tool use to be forced, so the model is steered by the prompt, reminded
+if it answers in text, and told when its last step is used up. If it still does not submit, the run is marked
+`needs_human_review`, so the loop always ends. Every tool is read-only:
 
 | Tool | What it answers |
 |---|---|

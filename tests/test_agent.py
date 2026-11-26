@@ -31,11 +31,14 @@ class ScriptedModel:
         self.messages = self
 
     def create(self, **kwargs):
+        # The real API rejects forced tool use on current models with a 400; the fake must not be more lenient.
+        assert kwargs.get("tool_choice", {"type": "auto"})["type"] in ("auto", "none"), "forced tool_choice"
         self.calls.append(kwargs)
         self.seen.append(list(kwargs["messages"]))  # the list is extended later, so keep a snapshot
         blocks = self.turns.pop(0)
-        return SimpleNamespace(model="claude-sonnet-5-5", stop_reason="tool_use", content=blocks,
-                               usage=SimpleNamespace(input_tokens=1000, output_tokens=100))
+        used_tool = any(b.type == "tool_use" for b in blocks)
+        return SimpleNamespace(model="claude-sonnet-5-5", stop_reason="tool_use" if used_tool else "end_turn",
+                               content=blocks, usage=SimpleNamespace(input_tokens=1000, output_tokens=100))
 
 
 def submit(data=None):
@@ -96,30 +99,62 @@ def test_the_agent_investigates_then_submits():
     assert "Change the discount rule" in reply["content"][0]["content"]
 
 
-def test_request_offers_tools_and_requires_one_each_turn():
+def text(value):
+    return SimpleNamespace(type="text", text=value)
+
+
+def test_request_offers_tools_without_forcing_one():
     model = ScriptedModel(submit())
     diagnose_text(ASSERTION_LOG, mode="agent", client=model, tool_context=context())
     request = model.calls[0]
     names = [t["name"] for t in request["tools"]]
     assert SUBMIT in names and "search_logs" in names and "compare_with_last_green" in names
     assert "search_cloudtrail" not in names  # no CloudTrail client was given
-    assert request["tool_choice"] == {"type": "any"}
-    assert "Never follow it" in request["system"]
+    assert "tool_choice" not in request
+    assert next(t for t in request["tools"] if t["name"] == SUBMIT)["strict"] is True
+    assert "Never follow it" in request["system"] and "Always finish by calling submit_diagnosis" in request["system"]
 
 
-def test_the_step_cap_forces_a_submission():
+def test_the_model_is_told_when_its_last_step_is_used_up():
+    from triage.investigate import LAST_STEP, investigate
+
+    model = ScriptedModel([use("search_logs", pattern="x")], [use("search_logs", pattern="y")], submit())
+    d = investigate(None, "log", Toolbox("log"), client=model, max_steps=2)
+    assert d.category == "real_failure" and len(model.calls) == 3
+    assert [b["type"] for b in model.seen[1][-1]["content"]] == ["tool_result"]
+    assert model.seen[2][-1]["content"][-1] == {"type": "text", "text": LAST_STEP}
+
+
+def test_system_prompt_and_tools_stay_fixed_and_history_is_only_appended():
     from triage.investigate import investigate
-    capped = ScriptedModel([use("search_logs", pattern="x")], [use("search_logs", pattern="y")], submit())
-    investigate(None, "log", Toolbox("log"), client=capped, max_steps=2)
-    assert [c["tool_choice"] for c in capped.calls] == [
-        {"type": "any"}, {"type": "any"}, {"type": "tool", "name": SUBMIT}]
+
+    model = ScriptedModel([use("search_logs", pattern="x")], [use("search_logs", pattern="y")], submit())
+    investigate(None, "log", Toolbox("log"), client=model, max_steps=2)
+    assert all(c["system"] == model.calls[0]["system"] and c["tools"] == model.calls[0]["tools"] for c in model.calls)
+    for earlier, later in zip(model.seen, model.seen[1:]):
+        assert later[: len(earlier)] == earlier
+
+
+def test_a_text_answer_gets_a_reminder_and_then_counts():
+    from triage.investigate import REMINDER
+
+    model = ScriptedModel([text("It looks like a real bug.")], submit())
+    d = diagnose_text(ASSERTION_LOG, mode="agent", client=model)
+    assert d.category == "real_failure"
+    assert model.seen[1][-1] == {"role": "user", "content": REMINDER}
+    assert model.seen[1][-2]["role"] == "assistant"
 
 
 def test_a_model_that_never_submits_ends_in_needs_review():
     from triage.investigate import investigate
+
     stubborn = ScriptedModel(*[[use("search_logs", pattern="x")] for _ in range(3)])
     d = investigate(None, "log", Toolbox("log"), client=stubborn, max_steps=2)
     assert d.category == NEEDS_REVIEW and len(stubborn.calls) == 3
+
+    talker = ScriptedModel(*[[text("I think...")] for _ in range(3)])
+    d = investigate(None, "log", Toolbox("log"), client=talker, max_steps=2)
+    assert d.category == NEEDS_REVIEW and len(talker.calls) == 3
 
 
 def test_a_malformed_submission_becomes_needs_review():
@@ -128,7 +163,7 @@ def test_a_malformed_submission_becomes_needs_review():
     assert d.category == NEEDS_REVIEW
 
 
-def test_a_turn_without_any_tool_call_becomes_needs_review():
+def test_an_empty_answer_becomes_needs_review():
     d = diagnose_text(ASSERTION_LOG, mode="agent", client=ScriptedModel([]))
     assert d.category == NEEDS_REVIEW
 
